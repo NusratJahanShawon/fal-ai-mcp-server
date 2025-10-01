@@ -1,0 +1,28 @@
+{
+  "name": "fal-image-modifier-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP HTTP Server for fal.ai image modification with Slack integration",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "mcp",
+    "fal.ai",
+    "image-modification",
+    "slack",
+    "runbear",
+    "railway"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "node-fetch": "^3.3.2",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
