@@ -21,6 +21,7 @@ import cors from "cors";
 const FAL_API_KEY = process.env.FAL_API_KEY;
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const PORT = process.env.PORT || 3000;
+const DEFAULT_SLACK_CHANNEL_ID = process.env.DEFAULT_SLACK_CHANNEL_ID || "C09FXDA104C";
 
 if (!FAL_API_KEY) {
   console.error("Error: FAL_API_KEY environment variable is required");
@@ -104,13 +105,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "send_to_slack",
-        description: "Send an image to a Slack channel with an optional message",
+        description: "Send an image to a Slack channel with an optional message (uses default channel if not provided)",
         inputSchema: {
           type: "object",
           properties: {
             channel_id: {
               type: "string",
-              description: "Slack channel ID (e.g., C09FQ934S2Z)",
+              description: "Slack channel ID (e.g., C09FQ934S2Z). If omitted, uses server default.",
             },
             image_url: {
               type: "string",
@@ -122,12 +123,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: "Here's your image!",
             },
           },
-          required: ["channel_id", "image_url"],
+          required: ["image_url"],
         },
       },
       {
         name: "modify_and_send_to_slack",
-        description: "Complete workflow: Modify an image with AI and automatically send it to a Slack channel",
+        description: "Complete workflow: Modify an image with AI and automatically send it to a Slack channel (uses default channel if not provided)",
         inputSchema: {
           type: "object",
           properties: {
@@ -141,7 +142,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             channel_id: {
               type: "string",
-              description: "Slack channel ID where the modified image will be sent",
+              description: "Slack channel ID where the modified image will be sent. If omitted, uses server default.",
             },
             model: {
               type: "string",
@@ -150,7 +151,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: "flux-pro-kontext",
             },
           },
-          required: ["image_url", "prompt", "channel_id"],
+          required: ["image_url", "prompt"],
+        },
+      },
+      {
+        name: "modify_slack_file_and_send",
+        description: "Download an image from Slack (file_id or url_private), modify it with fal.ai, then send result to a Slack channel (uses default channel if not provided)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            channel_id: {
+              type: "string",
+              description: "Slack channel ID (e.g., C09FQ934S2Z). If omitted, uses server default.",
+            },
+            prompt: {
+              type: "string",
+              description: "Text description of the modifications to apply",
+            },
+            file_id: {
+              type: "string",
+              description: "Slack file ID (e.g., F06ABC123)",
+            },
+            url_private: {
+              type: "string",
+              description: "Slack file private URL (url_private or url_private_download)",
+            },
+            model: {
+              type: "string",
+              description: "AI model to use",
+              enum: ["flux-pro-kontext", "flux-dev", "flux-pro"],
+              default: "flux-pro-kontext",
+            },
+          },
+          required: ["prompt"],
         },
       },
     ],
@@ -168,6 +201,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await sendToSlack(args);
     } else if (name === "modify_and_send_to_slack") {
       return await modifyAndSendToSlack(args);
+    } else if (name === "modify_slack_file_and_send") {
+      return await modifySlackFileAndSendToSlack(args);
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }
@@ -236,8 +271,9 @@ async function modifyImage(args) {
 
 async function sendToSlack(args) {
   const { channel_id, image_url, message = "Here's your image!" } = args;
+  const targetChannel = channel_id || DEFAULT_SLACK_CHANNEL_ID;
 
-  console.log(`📤 Sending image to Slack channel: ${channel_id}`);
+  console.log(`📤 Sending image to Slack channel: ${targetChannel}`);
 
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
@@ -246,7 +282,7 @@ async function sendToSlack(args) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      channel: channel_id,
+      channel: targetChannel,
       text: `${message}\n\n${image_url}`,
       unfurl_links: true,
       unfurl_media: true,
@@ -265,7 +301,7 @@ async function sendToSlack(args) {
     content: [
       {
         type: "text",
-        text: `✅ Image sent to Slack successfully!\n\n📍 Channel: ${channel_id}\n💬 Message: ${message}\n🔗 Image: ${image_url}`,
+        text: `✅ Image sent to Slack successfully!\n\n📍 Channel: ${targetChannel}\n💬 Message: ${message}\n🔗 Image: ${image_url}`,
       },
     ],
   };
@@ -273,6 +309,7 @@ async function sendToSlack(args) {
 
 async function modifyAndSendToSlack(args) {
   const { image_url, prompt, channel_id, model = "flux-pro-kontext" } = args;
+  const targetChannel = channel_id || DEFAULT_SLACK_CHANNEL_ID;
 
   console.log(`🔄 Starting complete workflow...`);
 
@@ -292,7 +329,7 @@ async function modifyAndSendToSlack(args) {
   // Step 2: Send to Slack
   console.log(`📤 Step 2: Sending to Slack...`);
   await sendToSlack({
-    channel_id,
+    channel_id: targetChannel,
     image_url: modifiedImageUrl,
     message: `✅ Modified image ready!\n\n📝 Prompt: ${prompt}\n🎨 Model: ${model}`,
   });
@@ -303,7 +340,95 @@ async function modifyAndSendToSlack(args) {
     content: [
       {
         type: "text",
-        text: `✅ Complete workflow successful!\n\n📝 Prompt: ${prompt}\n🎨 Model: ${model}\n📍 Channel: ${channel_id}\n🔗 Modified Image: ${modifiedImageUrl}\n\n✨ Your modified image has been sent to Slack!`,
+        text: `✅ Complete workflow successful!\n\n📝 Prompt: ${prompt}\n🎨 Model: ${model}\n📍 Channel: ${targetChannel}\n🔗 Modified Image: ${modifiedImageUrl}\n\n✨ Your modified image has been sent to Slack!`,
+      },
+    ],
+  };
+}
+
+// Helper: convert ArrayBuffer to Base64
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return Buffer.from(binary, "binary").toString("base64");
+}
+
+// Helper: fetch Slack file (by url_private) as data URL
+async function fetchSlackFileUrlAsDataUrl(url) {
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+  });
+  if (!resp.ok) {
+    let detail = `${resp.status} ${resp.statusText}`;
+    try {
+      const errJson = await resp.json();
+      detail = errJson.error || JSON.stringify(errJson);
+    } catch (_) {}
+    throw new Error(`Slack file download failed: ${detail}`);
+  }
+  const contentType = resp.headers.get("content-type") || "application/octet-stream";
+  const arrayBuf = await resp.arrayBuffer();
+  const base64 = arrayBufferToBase64(arrayBuf);
+  return `data:${contentType};base64,${base64}`;
+}
+
+// Helper: given file_id, resolve url_private, then fetch as data URL
+async function fetchSlackFileIdAsDataUrl(fileId) {
+  const infoResp = await fetch(`https://slack.com/api/files.info?file=${encodeURIComponent(fileId)}`, {
+    headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+  });
+  const info = await infoResp.json();
+  if (!info.ok) {
+    throw new Error(`Slack files.info error: ${info.error}`);
+  }
+  const file = info.file;
+  const privateUrl = file.url_private_download || file.url_private;
+  if (!privateUrl) {
+    throw new Error("Slack file does not contain a downloadable url_private");
+  }
+  return await fetchSlackFileUrlAsDataUrl(privateUrl);
+}
+
+// New tool: modify Slack file and send to Slack
+async function modifySlackFileAndSendToSlack(args) {
+  const { channel_id, prompt, file_id, url_private, model = "flux-pro-kontext" } = args;
+  const targetChannel = channel_id || DEFAULT_SLACK_CHANNEL_ID;
+
+  if (!file_id && !url_private) {
+    throw new Error("Provide either file_id or url_private");
+  }
+
+  console.log("📥 Fetching Slack file...");
+  const dataUrl = file_id
+    ? await fetchSlackFileIdAsDataUrl(file_id)
+    : await fetchSlackFileUrlAsDataUrl(url_private);
+
+  console.log("🎨 Modifying image via fal.ai...");
+  const modifyResult = await modifyImage({ image_url: dataUrl, prompt, model });
+
+  const resultText = modifyResult.content[0].text;
+  const urlMatch = resultText.match(/Result URL: (https?:\/\/[^\s]+)/);
+  const modifiedImageUrl = urlMatch ? urlMatch[1] : null;
+  if (!modifiedImageUrl) {
+    throw new Error("Failed to extract modified image URL");
+  }
+
+  console.log("📤 Sending modified image to Slack...");
+  await sendToSlack({
+    channel_id: targetChannel,
+    image_url: modifiedImageUrl,
+    message: `✅ Modified image ready!\n\n📝 Prompt: ${prompt}\n🎨 Model: ${model}`,
+  });
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: `✅ Complete workflow successful!\n\n📝 Prompt: ${prompt}\n🎨 Model: ${model}\n📍 Channel: ${targetChannel}\n🔗 Modified Image: ${modifiedImageUrl}`,
       },
     ],
   };
